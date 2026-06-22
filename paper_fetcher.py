@@ -61,7 +61,7 @@ def get_papers_ss(author_id: str, limit: int = 40) -> list:
         return []
 
     papers = []
-    for p in data.get('data', []):
+    for p in tqdm(data.get('data', []), desc='  논문', unit='편', leave=False, colour='yellow'):
         if not p.get('title'):
             continue
         paper = {
