@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SNU 교수 탐색기</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Serif+KR:wght@400;600;700&family=Noto+Sans+KR:wght@300;400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<!-- ── Header ────────────────────────────────────────────────────── -->
+<header id="header">
+  <div class="header-left">
+    <div class="logo">
+      <span class="logo-snu">SNU</span>
+      <span class="logo-sep">·</span>
+      <span class="logo-text">교수 탐색기</span>
+    </div>
+    <div class="stats-bar" id="stats-bar">
+      <span class="stat-item" id="stat-profs">—</span>
+      <span class="stat-dot">·</span>
+      <span class="stat-item" id="stat-depts">—</span>
+      <span class="stat-dot">·</span>
+      <span class="stat-item" id="stat-papers">—</span>
+    </div>
+  </div>
+
+  <div class="header-center">
+    <div class="search-wrap">
+      <svg class="search-icon" viewBox="0 0 20 20" fill="none">
+        <circle cx="8.5" cy="8.5" r="5.5" stroke="currentColor" stroke-width="1.5"/>
+        <path d="M13.5 13.5L17 17" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+      </svg>
+      <input type="text" id="search-input" placeholder="이름, 연구분야, 실험실 검색…" autocomplete="off" spellcheck="false">
+      <kbd class="search-hint">⌘K</kbd>
+    </div>
+  </div>
+
+  <div class="header-right">
+    <div class="view-toggle">
+      <button class="view-btn active" id="btn-grid" title="카드 보기">
+        <svg viewBox="0 0 16 16" fill="currentColor">
+          <rect x="1" y="1" width="6" height="6" rx="1"/>
+          <rect x="9" y="1" width="6" height="6" rx="1"/>
+          <rect x="1" y="9" width="6" height="6" rx="1"/>
+          <rect x="9" y="9" width="6" height="6" rx="1"/>
+        </svg>
+      </button>
+      <button class="view-btn" id="btn-tags" title="키워드 탐색">
+        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4">
+          <path d="M2 4h12M2 8h8M2 12h5"/>
+          <circle cx="13" cy="12" r="2"/>
+        </svg>
+      </button>
+      <button class="view-btn" id="btn-list" title="목록 보기">
+        <svg viewBox="0 0 16 16" fill="currentColor">
+          <rect x="1" y="2" width="14" height="2" rx="1"/>
+          <rect x="1" y="7" width="14" height="2" rx="1"/>
+          <rect x="1" y="12" width="14" height="2" rx="1"/>
+        </svg>
+      </button>
+    </div>
+  </div>
+</header>
+
+<!-- ── Layout ────────────────────────────────────────────────────── -->
+<div class="layout">
+
+  <!-- Sidebar -->
+  <aside id="sidebar">
+    <div class="sidebar-inner">
+
+      <!-- Active filters -->
+      <div class="filter-section" id="active-filters-wrap" style="display:none">
+        <div class="filter-label">적용 중인 필터</div>
+        <div id="active-filters" class="active-filters"></div>
+      </div>
+
+      <!-- Sort -->
+      <div class="filter-section">
+        <div class="filter-label">정렬</div>
+        <select id="sort-select" class="filter-select">
+          <option value="name_kr">가나다순 (한글)</option>
+          <option value="name_en">알파벳순 (영문)</option>
+          <option value="joined">부임 최신순</option>
+          <option value="department">학과순</option>
+          <option value="updated">최근 업데이트순</option>
+        </select>
+      </div>
+
+      <!-- Position -->
+      <div class="filter-section">
+        <div class="filter-label">직위</div>
+        <div class="checkbox-group" id="position-filters">
+          <label class="check-item">
+            <input type="checkbox" value="" checked data-filter="position"> 전체
+          </label>
+          <label class="check-item">
+            <input type="checkbox" value="교수" data-filter="position"> 교수
+          </label>
+          <label class="check-item">
+            <input type="checkbox" value="부교수" data-filter="position"> 부교수
+          </label>
+          <label class="check-item">
+            <input type="checkbox" value="조교수" data-filter="position"> 조교수
+          </label>
+          <label class="check-item">
+            <input type="checkbox" value="명예교수" data-filter="position"> 명예교수
+          </label>
+          <label class="check-item">
+            <input type="checkbox" value="석좌교수" data-filter="position"> 석좌교수
+          </label>
+        </div>
+      </div>
+
+      <!-- College / Department tree -->
+      <div class="filter-section">
+        <div class="filter-label">단과대학 · 학과</div>
+        <div id="college-tree" class="college-tree">
+          <div class="tree-loading">불러오는 중…</div>
+        </div>
+      </div>
+
+      <!-- Research keyword filter -->
+      <div class="filter-section">
+        <div class="filter-label">연구 키워드</div>
+        <input type="text" id="keyword-search" class="filter-input" placeholder="키워드 입력…">
+        <div id="keyword-suggestions" class="kw-suggestions"></div>
+      </div>
+
+    </div>
+  </aside>
+
+  <!-- Main content -->
+  <main id="main">
+    <!-- Results bar -->
+    <div class="results-bar">
+      <span id="result-count" class="result-count">0명</span>
+      <span id="active-keyword-badge" class="kw-badge" style="display:none"></span>
+      <button id="clear-all-btn" class="clear-btn" style="display:none">전체 초기화</button>
+    </div>
+
+    <!-- Grid view -->
+    <div id="view-grid" class="professor-grid"></div>
+
+    <!-- List view -->
+    <div id="view-list" class="professor-list" style="display:none"></div>
+
+    <!-- Keyword tag cloud view -->
+    <div id="view-tags" style="display:none">
+      <div class="tags-intro">
+        <h2 class="tags-title">연구 키워드로 탐색</h2>
+        <p class="tags-sub">태그를 클릭하면 해당 분야 교수진을 볼 수 있습니다</p>
+      </div>
+      <div id="tag-cloud" class="tag-cloud"></div>
+    </div>
+
+    <!-- Empty state -->
+    <div id="empty-state" class="empty-state" style="display:none">
+      <div class="empty-icon">∅</div>
+      <div class="empty-title">검색 결과 없음</div>
+      <div class="empty-sub">다른 키워드나 필터를 시도해보세요</div>
+    </div>
+
+    <!-- Loading state -->
+    <div id="loading-state" class="loading-state">
+      <div class="spinner"></div>
+      <div class="loading-text">데이터 불러오는 중…</div>
+    </div>
+  </main>
+</div>
+
+<!-- ── Side Panel ─────────────────────────────────────────────────── -->
+<div id="panel-overlay" class="panel-overlay" style="display:none"></div>
+<aside id="side-panel" class="side-panel">
+  <button class="panel-close" id="panel-close">
+    <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2">
+      <path d="M15 5L5 15M5 5l10 10"/>
+    </svg>
+  </button>
+
+  <div id="panel-content" class="panel-content">
+    <!-- Filled by JS -->
+  </div>
+</aside>
+
+<script src="app.js"></script>
+</body>
+</html>
