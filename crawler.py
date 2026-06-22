@@ -20,6 +20,8 @@ from urllib.parse import urljoin, urlparse
 import database
 from paper_fetcher import fetch_papers_for_professor
 
+from tqdm import tqdm
+
 # ─── Config ────────────────────────────────────────────────────────────────────
 
 HEADERS = {
@@ -534,7 +536,7 @@ def crawl_dept(key: str, fetch_papers: bool = True) -> int:
     print(f'  Found {len(professors)} professors')
 
     saved = 0
-    for prof in professors:
+    for prof in tqdm(professors, desc=config['name'], unit='명', leave=False, colour='green'):
         try:
             prof_id = database.upsert_professor(prof)
 
@@ -581,7 +583,7 @@ def main():
         if invalid:
             print(f'[!] Unknown dept keys: {", ".join(invalid)}')
 
-    for key in keys:
+    for key in tqdm(keys, desc='전체 학과', unit='개', colour='blue'):
         count = crawl_dept(key, fetch_papers=fetch_papers)
         total += count
         time.sleep(1.5)
