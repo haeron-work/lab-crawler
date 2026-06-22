@@ -1,6 +1,5 @@
 /* ══════════════════════════════════════════════════════════════
-   SNU Faculty Explorer — app.js (static / GitHub Pages build)
-   All data loaded from data.json; filtering done in-memory.
+   SNU Faculty Explorer — app.js (v1 / Flask API version)
    ══════════════════════════════════════════════════════════════ */
 
 'use strict';
@@ -8,9 +7,10 @@
 // ─── State ──────────────────────────────────────────────────────────────────
 
 const state = {
-  all:        [],   // master list — never mutated
-  keywords:   [],   // { keyword, count }[]
-  colleges:   [],   // college tree
+  professors: [],
+  keywords:   [],
+  colleges:   [],
+  stats:      {},
 
   view: 'grid',
   filters: {
@@ -24,103 +24,20 @@ const state = {
   activeKeyword: '',
 };
 
-// ─── Data loading ────────────────────────────────────────────────────────────
+// ─── API ────────────────────────────────────────────────────────────────────
 
-async function loadData() {
-  // Support both GitHub Pages (data.json) and local http.server
-  const paths = ['data.json', './data.json', '../static/data.json'];
-  for (const path of paths) {
-    try {
-      const res = await fetch(path);
-      if (res.ok) return res.json();
-    } catch (_) { /* try next */ }
+async function api(path) {
+  const res = await fetch(path);
+  if (!res.ok) throw new Error(`API ${path} → ${res.status}`);
+  return res.json();
+}
+
+function buildQuery(filters) {
+  const p = new URLSearchParams();
+  for (const [k, v] of Object.entries(filters)) {
+    if (v) p.set(k, v);
   }
-  throw new Error('data.json not found — run: python crawler.py && python export.py');
-}
-
-// ─── Compute helpers ─────────────────────────────────────────────────────────
-
-function computeKeywords(profs) {
-  const counts = {};
-  profs.forEach(p => {
-    (p.research_areas || []).forEach(a => {
-      if (a) counts[a] = (counts[a] || 0) + 1;
-    });
-  });
-  return Object.entries(counts)
-    .map(([keyword, count]) => ({ keyword, count }))
-    .sort((a, b) => b.count - a.count);
-}
-
-function computeColleges(profs) {
-  const map = {};
-  profs.forEach(p => {
-    const c = p.college    || '기타';
-    const d = p.department || '기타';
-    if (!map[c]) map[c] = { name: c, depts: {}, total: 0 };
-    map[c].depts[d] = (map[c].depts[d] || 0) + 1;
-    map[c].total++;
-  });
-  return Object.values(map).map(c => ({
-    name:        c.name,
-    total:       c.total,
-    departments: Object.entries(c.depts)
-                   .map(([name, count]) => ({ name, count }))
-                   .sort((a, b) => a.name.localeCompare(b.name)),
-  })).sort((a, b) => a.name.localeCompare(b.name));
-}
-
-function computeStats(profs) {
-  const colleges   = new Set(profs.map(p => p.college)).size;
-  const departments= new Set(profs.map(p => p.department)).size;
-  const papers     = profs.reduce((s, p) => s + (p.papers?.length || 0), 0);
-  return { professors: profs.length, colleges, departments, papers };
-}
-
-// ─── Filtering & sorting ─────────────────────────────────────────────────────
-
-const SORT_FNS = {
-  name_kr:    (a, b) => (a.name_kr || '').localeCompare(b.name_kr || '', 'ko'),
-  name_en:    (a, b) => (a.name_en || a.name_kr || '').localeCompare(b.name_en || b.name_kr || ''),
-  joined:     (a, b) => (b.joined_year || 0) - (a.joined_year || 0) || (a.name_kr || '').localeCompare(b.name_kr || '', 'ko'),
-  department: (a, b) => (a.department || '').localeCompare(b.department || '', 'ko') || (a.name_kr || '').localeCompare(b.name_kr || '', 'ko'),
-  updated:    (a, b) => (b.updated_at || '').localeCompare(a.updated_at || ''),
-};
-
-function applyFilters() {
-  const f = state.filters;
-  let result = state.all;
-
-  if (f.college)    result = result.filter(p => p.college === f.college);
-  if (f.department) result = result.filter(p => p.department === f.department);
-  if (f.position)   result = result.filter(p => p.position === f.position);
-
-  if (f.keyword) {
-    const kw = f.keyword.toLowerCase();
-    result = result.filter(p =>
-      (p.research_areas || []).join(' ').toLowerCase().includes(kw) ||
-      (p.bio  || '').toLowerCase().includes(kw) ||
-      (p.lab  || '').toLowerCase().includes(kw)
-    );
-  }
-
-  if (f.search) {
-    const s = f.search.toLowerCase();
-    result = result.filter(p =>
-      (p.name_kr  || '').includes(s) ||
-      (p.name_en  || '').toLowerCase().includes(s) ||
-      (p.research_areas || []).join(' ').toLowerCase().includes(s) ||
-      (p.lab      || '').toLowerCase().includes(s) ||
-      (p.email    || '').toLowerCase().includes(s)
-    );
-  }
-
-  const sortFn = SORT_FNS[f.sort] || SORT_FNS.name_kr;
-  result = [...result].sort(sortFn);
-
-  renderProfessors(result);
-  document.getElementById('result-count').textContent = `${result.length}명`;
-  updateActiveFilterBadge();
+  return p.toString() ? '?' + p.toString() : '';
 }
 
 // ─── Render helpers ──────────────────────────────────────────────────────────
@@ -169,7 +86,7 @@ function renderCard(p) {
       </div>
       ${(p.research_areas||[]).length ? `<div class="card-areas">${areaTagsHtml(p.research_areas, 3)}</div>` : ''}
       <div class="card-footer">
-        <span class="card-paper-count">${p.papers?.length ? `논문 ${p.papers.length}편` : ''}</span>
+        <span class="card-paper-count"></span>
         ${p.email ? `<span class="card-email">${esc(p.email)}</span>` : ''}
       </div>
     </div>
@@ -183,7 +100,6 @@ function renderListItem(p) {
     ? `<div class="list-thumb"><img src="${esc(p.photo_url)}" alt="${esc(p.name_kr)}"
             onerror="this.outerHTML='<div class=\\"list-thumb\\">${esc(inits)}</div>'"></div>`
     : `<div class="list-thumb">${esc(inits)}</div>`;
-
   const areas  = (p.research_areas || []).slice(0,4).map(a => `<span class="area-tag">${esc(a)}</span>`).join('');
 
   return `
@@ -219,16 +135,22 @@ function renderProfessors(profs) {
 
 // ─── Side Panel ──────────────────────────────────────────────────────────────
 
-function openPanel(profId) {
-  const p       = state.all.find(x => x.id === profId);
+async function openPanel(profId) {
   const panel   = document.getElementById('side-panel');
   const overlay = document.getElementById('panel-overlay');
+  const content = document.getElementById('panel-content');
 
-  if (!p) return;
   overlay.style.display = 'block';
   panel.classList.add('open');
-  document.getElementById('panel-content').innerHTML = buildPanelHTML(p);
-  initPanelInteractions(document.getElementById('panel-content'), p);
+  content.innerHTML = '<div class="panel-loading"><div class="spinner"></div></div>';
+
+  try {
+    const p = await api(`/api/professors/${profId}`);
+    content.innerHTML = buildPanelHTML(p);
+    initPanelInteractions(content, p);
+  } catch (e) {
+    content.innerHTML = `<div class="panel-section"><p style="color:var(--red-soft)">로드 실패: ${e.message}</p></div>`;
+  }
 }
 
 function closePanel() {
@@ -252,11 +174,11 @@ function buildPanelHTML(p) {
     : `<div class="panel-photo">${esc(inits)}</div>`;
 
   const contacts = [
-    p.email      && `<div class="contact-item"><span class="contact-label">이메일</span><a href="mailto:${esc(p.email)}">${esc(p.email)}</a></div>`,
-    p.phone      && `<div class="contact-item"><span class="contact-label">전화</span><span>${esc(p.phone)}</span></div>`,
-    p.office     && `<div class="contact-item"><span class="contact-label">연구실</span><span>${esc(p.office)}</span></div>`,
-    p.lab        && `<div class="contact-item"><span class="contact-label">연구실명</span><span>${esc(p.lab)}</span></div>`,
-    p.homepage   && `<div class="contact-item"><span class="contact-label">홈페이지</span><a href="${esc(p.homepage)}" target="_blank" rel="noopener">${esc(p.homepage.replace(/^https?:\/\//,''))}</a></div>`,
+    p.email       && `<div class="contact-item"><span class="contact-label">이메일</span><a href="mailto:${esc(p.email)}">${esc(p.email)}</a></div>`,
+    p.phone       && `<div class="contact-item"><span class="contact-label">전화</span><span>${esc(p.phone)}</span></div>`,
+    p.office      && `<div class="contact-item"><span class="contact-label">연구실</span><span>${esc(p.office)}</span></div>`,
+    p.lab         && `<div class="contact-item"><span class="contact-label">연구실명</span><span>${esc(p.lab)}</span></div>`,
+    p.homepage    && `<div class="contact-item"><span class="contact-label">홈페이지</span><a href="${esc(p.homepage)}" target="_blank" rel="noopener">${esc(p.homepage.replace(/^https?:\/\//,''))}</a></div>`,
     p.profile_url && `<div class="contact-item"><span class="contact-label">SNU 프로필</span><a href="${esc(p.profile_url)}" target="_blank" rel="noopener">바로가기 ↗</a></div>`,
   ].filter(Boolean).join('');
 
@@ -316,11 +238,11 @@ function paperHTML(p) {
     : esc(p.title);
 
   const meta = [
-    p.venue      && `<span class="paper-venue">${esc(p.venue)}</span>`,
-    p.year       && `<span>${p.year}</span>`,
-    p.citations  > 0 && `<span class="paper-citations">인용 ${p.citations}</span>`,
-    p.doi        && `<a href="https://doi.org/${esc(p.doi)}" target="_blank" style="color:var(--accent)">DOI</a>`,
-    p.arxiv_id   && `<a href="https://arxiv.org/abs/${esc(p.arxiv_id)}" target="_blank" style="color:var(--accent)">arXiv</a>`,
+    p.venue     && `<span class="paper-venue">${esc(p.venue)}</span>`,
+    p.year      && `<span>${p.year}</span>`,
+    p.citations > 0 && `<span class="paper-citations">인용 ${p.citations}</span>`,
+    p.doi       && `<a href="https://doi.org/${esc(p.doi)}" target="_blank" style="color:var(--accent)">DOI</a>`,
+    p.arxiv_id  && `<a href="https://arxiv.org/abs/${esc(p.arxiv_id)}" target="_blank" style="color:var(--accent)">arXiv</a>`,
   ].filter(Boolean).join('');
 
   return `
@@ -344,9 +266,8 @@ function initPanelInteractions(content, p) {
     tab.addEventListener('click', () => {
       content.querySelectorAll('.paper-tab').forEach(t => t.classList.remove('active'));
       tab.classList.add('active');
-      const which = tab.dataset.tab;
-      const all   = p.papers || [];
-      const filtered = all.filter(x => x.paper_type === which);
+      const which    = tab.dataset.tab;
+      const filtered = (p.papers || []).filter(x => x.paper_type === which);
       content.querySelector('#paper-list-container').innerHTML = renderPaperList(filtered);
       initExpandButtons(content);
     });
@@ -360,7 +281,7 @@ function initPanelInteractions(content, p) {
       state.filters.keyword = tag.dataset.area;
       state.activeKeyword   = tag.dataset.area;
       applyFilters();
-      refreshChips();
+      updateActiveFilterBadge();
     });
   });
 }
@@ -438,9 +359,10 @@ function setCollegeFilter(college, dept) {
   state.filters.college    = college;
   state.filters.department = dept;
   applyFilters();
+  updateActiveFilterBadge();
 }
 
-// ─── Keyword chips & cloud ────────────────────────────────────────────────────
+// ─── Keywords ─────────────────────────────────────────────────────────────────
 
 function renderKeywordSuggestions(keywords) {
   const container = document.getElementById('keyword-suggestions');
@@ -450,7 +372,7 @@ function renderKeywordSuggestions(keywords) {
 
   container.querySelectorAll('.kw-chip').forEach(chip => {
     chip.addEventListener('click', () => {
-      const kw = chip.dataset.kw;
+      const kw     = chip.dataset.kw;
       const active = chip.classList.contains('active');
       container.querySelectorAll('.kw-chip').forEach(c => c.classList.remove('active'));
       state.filters.keyword = active ? '' : kw;
@@ -458,6 +380,7 @@ function renderKeywordSuggestions(keywords) {
       if (!active) chip.classList.add('active');
       document.getElementById('keyword-search').value = '';
       applyFilters();
+      updateActiveFilterBadge();
     });
   });
 }
@@ -473,12 +396,12 @@ function renderTagCloud(keywords) {
   const cloud = document.getElementById('tag-cloud');
   if (!keywords.length) { cloud.innerHTML = '<p style="color:var(--text-muted)">데이터 없음</p>'; return; }
 
-  const maxC = keywords[0].count;
-  const minC = keywords[keywords.length - 1].count || 1;
+  const maxC  = keywords[0].count;
+  const minC  = keywords[keywords.length - 1].count || 1;
   const range = maxC - minC || 1;
 
   cloud.innerHTML = keywords.slice(0, 80).map(kw => {
-    const t = (kw.count - minC) / range;
+    const t    = (kw.count - minC) / range;
     const size = (0.72 + t * 0.78).toFixed(2);
     const op   = (0.45 + t * 0.55).toFixed(2);
     return `<span class="cloud-tag" data-kw="${esc(kw.keyword)}" style="font-size:${size}rem;opacity:${op}">
@@ -488,58 +411,45 @@ function renderTagCloud(keywords) {
 
   cloud.querySelectorAll('.cloud-tag').forEach(tag => {
     tag.addEventListener('click', () => {
-      const kw = tag.dataset.kw;
+      const kw     = tag.dataset.kw;
       const active = tag.classList.contains('active');
       cloud.querySelectorAll('.cloud-tag').forEach(t => t.classList.remove('active'));
       state.filters.keyword = active ? '' : kw;
       state.activeKeyword   = active ? '' : kw;
       if (!active) { tag.classList.add('active'); switchView('grid'); }
       applyFilters();
+      updateActiveFilterBadge();
     });
   });
 }
 
-function refreshChips() {
-  document.querySelectorAll('.kw-chip').forEach(c =>
-    c.classList.toggle('active', c.dataset.kw === state.activeKeyword)
-  );
-  document.querySelectorAll('.cloud-tag').forEach(t =>
-    t.classList.toggle('active', t.dataset.kw === state.activeKeyword)
-  );
-  document.querySelectorAll('.dept-item').forEach(item =>
-    item.classList.toggle('active',
-      item.dataset.college === state.filters.college &&
-      item.dataset.dept    === state.filters.department
-    )
-  );
+// ─── Filters ─────────────────────────────────────────────────────────────────
+
+function applyFilters() {
+  const q = buildQuery(state.filters);
+  showLoading(true);
+
+  api('/api/professors' + q)
+    .then(profs => {
+      state.professors = profs;
+      renderProfessors(profs);
+      document.getElementById('result-count').textContent = `${profs.length}명`;
+    })
+    .catch(err => console.error(err))
+    .finally(() => showLoading(false));
 }
-
-// ─── Stats ────────────────────────────────────────────────────────────────────
-
-function renderStats(stats, generatedAt) {
-  document.getElementById('stat-profs').textContent  = `${stats.professors}명`;
-  document.getElementById('stat-depts').textContent  = `${stats.departments}개 학과`;
-  document.getElementById('stat-papers').textContent = `${stats.papers.toLocaleString()}편 논문`;
-
-  if (generatedAt) {
-    const d = new Date(generatedAt);
-    document.getElementById('stat-papers').title = `갱신: ${d.toLocaleDateString('ko-KR')}`;
-  }
-}
-
-// ─── Active filter badges ─────────────────────────────────────────────────────
 
 function updateActiveFilterBadge() {
-  const badge    = document.getElementById('active-keyword-badge');
-  const clearBtn = document.getElementById('clear-all-btn');
-  const wrap     = document.getElementById('active-filters-wrap');
-  const container= document.getElementById('active-filters');
+  const badge     = document.getElementById('active-keyword-badge');
+  const clearBtn  = document.getElementById('clear-all-btn');
+  const wrap      = document.getElementById('active-filters-wrap');
+  const container = document.getElementById('active-filters');
 
   const tags = [
-    state.filters.college    && { label: state.filters.college,    key: 'college' },
-    state.filters.department && { label: state.filters.department, key: 'department' },
+    state.filters.college    && { label: state.filters.college,        key: 'college' },
+    state.filters.department && { label: state.filters.department,     key: 'department' },
     state.filters.keyword    && { label: '🏷 ' + state.filters.keyword, key: 'keyword' },
-    state.filters.position   && { label: state.filters.position,   key: 'position' },
+    state.filters.position   && { label: state.filters.position,       key: 'position' },
   ].filter(Boolean);
 
   wrap.style.display = tags.length ? '' : 'none';
@@ -556,7 +466,7 @@ function updateActiveFilterBadge() {
       if (key === 'keyword') state.activeKeyword = '';
       if (key === 'college') state.filters.department = '';
       applyFilters();
-      refreshChips();
+      updateActiveFilterBadge();
     });
   });
 
@@ -565,6 +475,14 @@ function updateActiveFilterBadge() {
 
   const hasAny = Object.entries(state.filters).some(([k,v]) => v && k !== 'sort');
   clearBtn.style.display = hasAny ? '' : 'none';
+}
+
+// ─── Stats ────────────────────────────────────────────────────────────────────
+
+function renderStats(stats) {
+  document.getElementById('stat-profs').textContent  = `${stats.professors || 0}명`;
+  document.getElementById('stat-depts').textContent  = `${stats.departments || 0}개 학과`;
+  document.getElementById('stat-papers').textContent = `${(stats.papers || 0).toLocaleString()}편 논문`;
 }
 
 // ─── View switching ───────────────────────────────────────────────────────────
@@ -579,6 +497,10 @@ function switchView(v) {
   document.getElementById('btn-tags').classList.toggle('active', v === 'tags');
 }
 
+function showLoading(on) {
+  document.getElementById('loading-state').style.display = on ? 'flex' : 'none';
+}
+
 // ─── Event listeners ──────────────────────────────────────────────────────────
 
 let searchTimer;
@@ -587,6 +509,7 @@ document.getElementById('search-input').addEventListener('input', e => {
   searchTimer = setTimeout(() => {
     state.filters.search = e.target.value.trim();
     applyFilters();
+    updateActiveFilterBadge();
   }, 250);
 });
 
@@ -599,7 +522,7 @@ document.querySelectorAll('input[data-filter="position"]').forEach(cb => {
   cb.addEventListener('change', () => {
     if (!cb.value) {
       state.filters.position = '';
-      document.querySelectorAll('input[data-filter="position"][value]').forEach(c => {
+      document.querySelectorAll('input[data-filter="position"]').forEach(c => {
         if (c.value) c.checked = false;
       });
     } else {
@@ -607,6 +530,7 @@ document.querySelectorAll('input[data-filter="position"]').forEach(cb => {
       state.filters.position = cb.checked ? cb.value : '';
     }
     applyFilters();
+    updateActiveFilterBadge();
   });
 });
 
@@ -624,7 +548,7 @@ document.getElementById('clear-all-btn').addEventListener('click', () => {
   document.getElementById('sort-select').value = 'name_kr';
   document.querySelectorAll('input[data-filter="position"]').forEach(c => { c.checked = !c.value; });
   applyFilters();
-  refreshChips();
+  updateActiveFilterBadge();
 });
 
 document.addEventListener('keydown', e => {
@@ -639,36 +563,38 @@ document.addEventListener('keydown', e => {
 // ─── Init ─────────────────────────────────────────────────────────────────────
 
 async function init() {
-  document.getElementById('loading-state').style.display = 'flex';
-
+  showLoading(true);
   try {
-    const data = await loadData();
-    const profs = data.professors || [];
+    const [professors, keywords, colleges, stats] = await Promise.all([
+      api('/api/professors'),
+      api('/api/keywords'),
+      api('/api/colleges'),
+      api('/api/stats'),
+    ]);
 
-    state.all      = profs;
-    state.keywords = computeKeywords(profs);
-    state.colleges = computeColleges(profs);
+    state.professors = professors;
+    state.keywords   = keywords;
+    state.colleges   = colleges;
+    state.stats      = stats;
 
-    renderStats(computeStats(profs), data.generated_at);
-    renderCollegeTree(state.colleges);
-    renderKeywordSuggestions(state.keywords);
-    renderTagCloud(state.keywords);
-    applyFilters();
+    renderStats(stats);
+    renderCollegeTree(colleges);
+    renderKeywordSuggestions(keywords);
+    renderTagCloud(keywords);
+    renderProfessors(professors);
+    document.getElementById('result-count').textContent = `${professors.length}명`;
 
-    if (!profs.length) {
+    if (!professors.length) {
       document.getElementById('empty-state').style.display = 'flex';
       document.querySelector('.empty-title').textContent = '데이터 없음';
-      document.querySelector('.empty-sub').textContent = 'python crawler.py && python export.py 실행 후 새로고침';
+      document.querySelector('.empty-sub').textContent = 'python crawler.py 실행 후 새로고침';
     }
 
   } catch (err) {
-    console.error(err);
-    document.getElementById('loading-state').style.display = 'none';
-    document.getElementById('empty-state').style.display = 'flex';
-    document.querySelector('.empty-title').textContent = '로드 실패';
-    document.querySelector('.empty-sub').textContent = err.message;
+    console.error('Init failed:', err);
+    document.querySelector('.loading-text').textContent = '서버 연결 실패 — python app.py 실행 확인';
   } finally {
-    document.getElementById('loading-state').style.display = 'none';
+    showLoading(false);
   }
 }
 
